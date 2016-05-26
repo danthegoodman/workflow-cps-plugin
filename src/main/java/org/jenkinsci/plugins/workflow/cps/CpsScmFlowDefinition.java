@@ -117,7 +117,7 @@ public class CpsScmFlowDefinition extends FlowDefinition {
         } finally {
             lease.release();
         }
-        CpsFlowExecution exec = new CpsFlowExecution(script, true, owner);
+        CpsFlowExecution exec = new CpsFlowExecution(script, false, owner);
         exec.flowStartNodeActions.add(new WorkspaceActionImpl(dir, null));
         return exec;
     }
