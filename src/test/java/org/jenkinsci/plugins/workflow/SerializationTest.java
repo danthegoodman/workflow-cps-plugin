@@ -1,5 +1,6 @@
 package org.jenkinsci.plugins.workflow;
 
+import groovy.lang.Closure;
 import hudson.model.Result;
 import hudson.slaves.DumbSlave;
 import org.jenkinsci.plugins.scriptsecurity.scripts.ScriptApproval;
@@ -157,6 +158,7 @@ public class SerializationTest extends SingleJobTestBase {
                     "for (def elt : arr) {echo \"running new-style loop on ${elt}\"; semaphore \"new-${elt}\"}"
                     , true));
                 ScriptApproval.get().approveSignature("staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods plus java.util.Collection java.lang.Object"); // TODO ought to be in generic-whitelist
+                ScriptApproval.get().approveSignature("staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods plus java.util.List java.lang.Object"); // TODO ought to be in generic-whitelist-groovy2
                 startBuilding();
                 SemaphoreStep.waitForStart("C-one/1", b);
                 story.j.waitForMessage("running C-style loop on one", b);
@@ -180,6 +182,47 @@ public class SerializationTest extends SingleJobTestBase {
                 story.j.waitForCompletion(b);
                 story.j.assertBuildStatusSuccess(b);
                 story.j.assertLogContains("running new-style loop on two", b);
+            }
+        });
+    }
+
+    @Ignore("TODO java.io.NotSerializableException: java.util.LinkedHashMap$Entry")
+    @Issue("JENKINS-27421")
+    @Test public void mapIterator() {
+        story.addStep(new Statement() {
+            @Override public void evaluate() throws Throwable {
+                p = jenkins().createProject(WorkflowJob.class, "demo");
+                ScriptApproval.get().approveSignature("staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods collect java.util.Map groovy.lang.Closure");
+                ScriptApproval.get().approveSignature("method java.util.Map entrySet");
+                p.setDefinition(new CpsFlowDefinition(
+                    "def map = [one: 1, two: 2]\n" +
+                    "@NonCPS def entries(m) {m.collect {k, v -> [k, v]}}; mapE = entries(map); for (int i = 0; i < mapE.size(); i++) {def e = mapE[i]; echo \"running C-style loop on ${e[0]} → ${e[1]}\"; semaphore \"C-${e[0]}\"}\n" +
+                    "for (def e : map.entrySet()) {echo \"running new-style loop on ${e.key} → ${e.value}\"; semaphore \"new-${e.key}\"}"
+                    // TODO check also keySet(), values()
+                    , true));
+                startBuilding();
+                SemaphoreStep.waitForStart("C-one/1", b);
+                story.j.waitForMessage("running C-style loop on one → 1", b);
+            }
+        });
+        story.addStep(new Statement() {
+            @Override public void evaluate() throws Throwable {
+                rebuildContext(story.j);
+                SemaphoreStep.success("C-one/1", null);
+                SemaphoreStep.success("C-two/1", null);
+                story.j.waitForMessage("running C-style loop on two → 2", b);
+                SemaphoreStep.waitForStart("new-one/1", b);
+                story.j.waitForMessage("running new-style loop on one → 1", b);
+            }
+        });
+        story.addStep(new Statement() {
+            @Override public void evaluate() throws Throwable {
+                rebuildContext(story.j);
+                SemaphoreStep.success("new-one/1", null);
+                SemaphoreStep.success("new-two/1", null);
+                story.j.waitForCompletion(b);
+                story.j.assertBuildStatusSuccess(b);
+                story.j.assertLogContains("running new-style loop on two → 2", b);
             }
         });
     }
@@ -228,6 +271,44 @@ public class SerializationTest extends SingleJobTestBase {
                 SemaphoreStep.waitForStart("c/1", b);
                 SemaphoreStep.success("c/1", null);
                 story.j.assertBuildStatusSuccess(story.j.waitForCompletion(b));
+                story.j.assertLogContains("abc", b);
+            }
+        });
+    }
+
+    /**
+     * Verifies that we are not throwing {@link UnsupportedOperationException} too aggressively.
+     * In particular:
+     * <ul>
+     * <li>on non-CPS-transformed {@link Closure}s
+     * <li>on closures passed to methods defined in Pipeline script
+     * <li>on closures passed to methods which did not declare {@link Closure} as a parameter type and so presumably are not going to try to call them
+     * </ul>
+     */
+    @Issue("JENKINS-26481")
+    @Test public void eachClosureNonCps() {
+        story.addStep(new Statement() {
+            @Override public void evaluate() throws Throwable {
+                ScriptApproval.get().approveSignature("staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods plus java.util.Collection java.lang.Object");
+                ScriptApproval.get().approveSignature("staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods plus java.util.List java.lang.Object"); // Groovy 2
+                p = jenkins().createProject(WorkflowJob.class, "demo");
+                p.setDefinition(new CpsFlowDefinition(
+                    "@NonCPS def fine() {\n" +
+                    "  def text = ''\n" +
+                    "  ['a', 'b', 'c'].each {it -> text += it}\n" +
+                    "  text\n" +
+                    "}\n" +
+                    "def takesMyOwnClosure(body) {\n" +
+                    "  node {\n" +
+                    "    def list = []\n" +
+                    "    list += body\n" +
+                    "    echo list[0]()\n" +
+                    "  }\n" +
+                    "}\n" +
+                    "takesMyOwnClosure {\n" +
+                    "  fine()\n" +
+                    "}\n", true));
+                b = story.j.assertBuildStatusSuccess(p.scheduleBuild2(0));
                 story.j.assertLogContains("abc", b);
             }
         });

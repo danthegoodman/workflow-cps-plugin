@@ -4,7 +4,6 @@ import com.cloudbees.groovy.cps.Continuable;
 import com.cloudbees.groovy.cps.Outcome;
 import org.jenkinsci.plugins.scriptsecurity.sandbox.RejectedAccessException;
 import org.jenkinsci.plugins.scriptsecurity.sandbox.groovy.GroovySandbox;
-import org.jenkinsci.plugins.scriptsecurity.sandbox.whitelists.ProxyWhitelist;
 import org.jenkinsci.plugins.scriptsecurity.scripts.ApprovalContext;
 import org.jenkinsci.plugins.scriptsecurity.scripts.ScriptApproval;
 
@@ -27,6 +26,7 @@ class SandboxContinuable extends Continuable {
     @Override
     public Outcome run0(final Outcome cn) {
         try {
+            CpsFlowExecution e = thread.group.getExecution();
             return GroovySandbox.runInSandbox(new Callable<Outcome>() {
                 @Override
                 public Outcome call() {
@@ -37,7 +37,9 @@ class SandboxContinuable extends Continuable {
                     }
                     return outcome;
                 }
-            }, new ProxyWhitelist(new GroovyClassLoaderWhitelist(thread.group.getExecution().getShell().getClassLoader()),CpsWhitelist.get()));
+            }, new GroovyClassLoaderWhitelist(CpsWhitelist.get(),
+                    e.getTrustedShell().getClassLoader(),
+                    e.getShell().getClassLoader()));
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {

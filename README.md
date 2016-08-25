@@ -13,3 +13,9 @@
     mv ~danny/workflow-cps.jar .
     chown jenkins:jenkins workflow-cps.jar
     service jenkins restart
+
+## About
+
+This branch disables the pipeline script sandbox for scripts running from a jenkinsfile.
+
+See also: https://issues.jenkins-ci.org/browse/JENKINS-28178
